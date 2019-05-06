@@ -1,3 +1,11 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+## Previo
+
+```{r include=FALSE}
 library(dplyr)
 library(survey)
 library(ggplot2)
@@ -9,8 +17,8 @@ library(caret)
 library(subselect)
 library(glmnet)
 library(pROC)
-
 setwd(dirname(rstudioapi::getActiveDocumentContext()$path))
+
 
 load("Diabetes_data.Rdata")
 
@@ -66,7 +74,7 @@ predM[, c("est_marg")]=0
 predM[, c("est_var")]=0
 predM[, c("waist_circum")]=0
 predM[, c("obesity")]=0
-predM[, c("nodiagn")]=0
+#predM[, c("nodiagn")]=0
 
 
 #probablente cambiar
@@ -90,16 +98,34 @@ meth[c("alcohol_hist")]="logreg"
 imputed <- mice(diabetes, method=meth, predictorMatrix=predM, m=5)
 imputed <- complete(imputed)
 sapply(imputed, function(x) sum(is.na(x)))
+```
 
+## Estratificar
+
+```{r}
 trainingRows <- createDataPartition(imputed$prediabetes,p = .8,list= FALSE)
 training <- imputed[trainingRows,]
 test <- imputed[-trainingRows,]
+```
+
+
+Checar que esten balanceados los casos en train y test
+```{r}
+prop.table(table(training$prediabetes))
+```
+
+```{r}
+prop.table(table(test$prediabetes))
+```
+
+## Modelo
+
+```{r}
 reduced<- c("age", "sex", "BMI", 
             "education_level", "income_q", "area", "hypertension_hist", 
             "stroke", "physical_act",
             "diabetes_hist", "social_security", "smoker", "alcohol_hist", 
             "cardiovascular_hist")
-
 ctrl <- trainControl(method = "LGOCV",
                      summaryFunction = twoClassSummary,
                      classProbs = TRUE,
@@ -107,9 +133,10 @@ ctrl <- trainControl(method = "LGOCV",
                      savePredictions = TRUE)
 
 x <- model.matrix( ~ ., imputed[,reduced])
+```
 
+```{r}
 glmnGrid <- expand.grid(.alpha = c(0, .1, .2, .4, .6, .8, 1),.lambda = seq(.01, 1, length = 80))
-
 glmnTuned <- train(x,
                    y = imputed$prediabetes,weights = imputed$PONDEV3/mean(imputed$PONDEV3),
                    method = "glmnet",
@@ -117,10 +144,12 @@ glmnTuned <- train(x,
                    metric = "ROC",
                    trControl = ctrl)
 
-glmnTuned$bestTune
-
-selected<-glmnTuned$pred
-
-selected<-selected %>% filter(alpha==glmnTuned$bestTune$alpha,lambda==glmnTuned$bestTune$lambda)
-
+selected <- glmnTuned$pred
+selected <- selected %>% filter(alpha==glmnTuned$bestTune$alpha,lambda==glmnTuned$bestTune$lambda)
 ROC<-plot.roc(selected$obs,selected$Yes,print.auc=T)
+```
+
+
+
+
+

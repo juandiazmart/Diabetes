@@ -3,13 +3,13 @@ title: "R Notebook"
 output: html_notebook
 ---
 
-## Previo
+#### Preprosessing
 
 ```{r include=FALSE}
 library(dplyr)
 library(survey)
 library(ggplot2)
-library(plyr)
+# library(plyr)
 library(VIM)
 library(mice)
 library(AppliedPredictiveModeling)
@@ -97,28 +97,29 @@ meth[c("alcohol_hist")]="logreg"
 
 imputed <- mice(diabetes, method=meth, predictorMatrix=predM, m=5)
 imputed <- complete(imputed)
-sapply(imputed, function(x) sum(is.na(x)))
+# sapply(imputed, function(x) sum(is.na(x)))
 ```
 
-## Estratificar
+# Diabetes
+
+## Stratify
 
 ```{r}
-trainingRows <- createDataPartition(imputed$prediabetes,p = .8,list= FALSE)
+trainingRows <- createDataPartition(imputed$diabetes,p = .8,list= FALSE)
 training <- imputed[trainingRows,]
 test <- imputed[-trainingRows,]
 ```
 
-
-Checar que esten balanceados los casos en train y test
+Check that the classes are blanced in train and test.
 ```{r}
-prop.table(table(training$prediabetes))
+prop.table(table(training$diabetes))
 ```
 
 ```{r}
-prop.table(table(test$prediabetes))
+prop.table(table(test$diabetes))
 ```
 
-## Modelo
+## Model
 
 ```{r}
 reduced<- c("age", "sex", "BMI", 
@@ -138,7 +139,8 @@ x <- model.matrix( ~ ., imputed[,reduced])
 ```{r}
 glmnGrid <- expand.grid(.alpha = c(0, .1, .2, .4, .6, .8, 1),.lambda = seq(.01, 1, length = 80))
 glmnTuned <- train(x,
-                   y = imputed$prediabetes,weights = imputed$PONDEV3/mean(imputed$PONDEV3),
+                   y = imputed$diabetes,
+                   weights = imputed$PONDEV3/mean(imputed$PONDEV3),
                    method = "glmnet",
                    tuneGrid = glmnGrid,
                    metric = "ROC",
@@ -148,6 +150,198 @@ selected <- glmnTuned$pred
 selected <- selected %>% filter(alpha==glmnTuned$bestTune$alpha,lambda==glmnTuned$bestTune$lambda)
 ROC<-plot.roc(selected$obs,selected$Yes,print.auc=T)
 ```
+
+We're going to try different aproaches to fix unbalanced class
+
+1. Undersampling and Oversampling majority class
+2. Create Synthetic data of minority class
+3. Overbagging
+4. Cost Sensitive Learning
+
+## 1. Sampling
+
+Se quita la paqueteria caret por que tiene problemas con mlr
+```{r}
+detach("package:caret", unload=TRUE)
+library(tidyverse)
+library(mlr)
+```
+Sampling the number of minority class
+
+```{r}
+columnas = c("age", "sex", "BMI", 
+            "education_level", "income_q", "area", "hypertension_hist", 
+            "stroke", "physical_act",
+            "diabetes_hist", "social_security", "smoker", "alcohol_hist", 
+            "cardiovascular_hist", "diabetes")
+df_train = training %>% select(one_of(columnas))
+df_test = test %>% select(one_of(columnas))
+task = makeClassifTask(data = df_train, target = "diabetes")
+```
+
+```{r}
+task.over = oversample(task, rate = 18)
+task.under = undersample(task, rate = 0.06)
+```
+
+Original:
+```{r}
+table(getTaskTargets(task))
+```
+Oversample:
+```{r}
+table(getTaskTargets(task.over))
+```
+
+Undersample:
+```{r}
+
+table(getTaskTargets(task.under))
+```
+
+Test the methods
+
+```{r}
+classif.lrn = makeLearner("classif.glmnet", predict.type = "prob", fix.factors.prediction = TRUE)
+mod = train(classif.lrn, task)
+mod.over = train(classif.lrn, task.over)
+mod.under = train(classif.lrn, task.under)
+```
+
+Predict
+```{r}
+pred = predict(mod, newdata = df_test)
+pred.over = predict(mod.over, newdata = df_test)
+pred.under = predict(mod.under, newdata = df_test)
+```
+
+Performance
+```{r}
+performance(pred, measures = list(acc ,auc, ppv,  tpr ))
+performance(pred.over, measures = list(acc ,auc, ppv, tpr ))
+performance(pred.under, measures = list(acc ,auc, ppv,  tpr ))
+```
+
+> Future: Try multiple classifications models: Decision Tree, Random Forest, SVM, Gradient Boosting Machine
+
+## 2. Synthetic
+
+We use SMOTE (Synthetic Minority Oversampling Technique) algorithm
+```{r}
+task.smote = smote(task, rate = 18, nn = 5)
+table(getTaskTargets(task.smote))
+mod.smote = train(classif.lrn, task.smote)
+pred.smote = predict(mod.smote, newdata = df_test)
+```
+
+
+```{r}
+performance(pred.smote, measures = list(acc ,auc, ppv,  tpr ))
+```
+
+## 3. Overbagging
+
+#### Decision tree
+Without Overbagging:
+```{r}
+lrn.tree = makeLearner("classif.rpart", predict.type = "response")
+obw.lrn = makeOverBaggingWrapper(lrn.tree, obw.rate = 18, obw.iters = 10)
+lrn.tree = setPredictType(lrn.tree, "prob")
+rdesc = makeResampleDesc("CV", iters = 5)
+r1 = resample(learner = lrn.tree, task = task, resampling = rdesc, show.info = FALSE, measures = list(auc, tpr))
+r1$aggr
+```
+
+With Overbagging:
+```{r}
+obw.lrn = setPredictType(obw.lrn, "prob")
+r2 = resample(learner = obw.lrn, task = task, resampling = rdesc, show.info = FALSE, measures = list(auc, tpr))
+r2$aggr
+```
+
+#### Random Forest
+Without Overbagging:
+```{r}
+lrn.forest = makeLearner("classif.ranger", predict.type = "response")
+obw.lrn = makeOverBaggingWrapper(lrn.forest, obw.rate = 18, obw.iters = 10)
+lrn.forest = setPredictType(lrn.forest, "prob")
+rdesc = makeResampleDesc("CV", iters = 5)
+r1 = resample(learner = lrn.forest, task = task, resampling = rdesc, show.info = FALSE, measures = list(auc, tpr))
+r1$aggr
+```
+
+With Overbagging:
+```{r}
+obw.lrn = setPredictType(obw.lrn, "prob")
+r2 = resample(learner = obw.lrn, task = task, resampling = rdesc, show.info = FALSE, measures = list(auc, tpr))
+r2$aggr
+```
+
+
+## 4. Cost Sensitive Learning
+
+```{r}
+matriz_costos = matrix(c(0, 1, 5, 0), 2)
+colnames(matriz_costos) = rownames(matriz_costos) = getTaskClassLevels(task)
+```
+```{r}
+
+```
+
+
+```{r}
+lrn.multinom= makeLearner("classif.multinom", predict.type = "prob", trace = FALSE)
+mod.multinom = train(lrn.multinom, task)
+pred.multinom = predict(mod.multinom, task = task)
+```
+
+Calculate the theoretical threshold for the positive class
+```{r}
+th = matriz_costos[2,1]/(matriz_costos[2,1] + matriz_costos[1,2])
+th
+```
+```{r}
+pred.th = setThreshold(pred.multinom, th)
+```
+
+```{r}
+pred.th
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+## Tuning threshold
+```{r}
+lrn.gbm = makeLearner("classif.gbm", predict.type = "prob", distribution = "bernoulli")
+ps = makeParamSet(
+  makeIntegerParam("interaction.depth", lower = 1, upper = 5)
+)
+ctrl.tune = makeTuneControlRandom(maxit = 2, tune.threshold = TRUE)
+lrn.gbm = makeTuneWrapper(lrn.gbm, par.set = ps,control = ctrl.tune, resampling = cv2)
+r = resample(lrn.gbm, task, cv3, extract = getTuneResult)
+```
+```{r}
+print(r$extract)
+```
+
+
+
+
+
+
+
+
 
 
 

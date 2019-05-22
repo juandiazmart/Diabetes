@@ -1,6 +1,8 @@
 ---
 title: "R Notebook"
-output: html_notebook
+output:
+  pdf_document: default
+  html_notebook: default
 ---
 
 #### Preprosessing
@@ -278,72 +280,6 @@ r2$aggr
 ```
 
 
-## 4. Cost Sensitive Learning
-
-```{r}
-matriz_costos = matrix(c(0, 1, 5, 0), 2)
-colnames(matriz_costos) = rownames(matriz_costos) = getTaskClassLevels(task)
-```
-```{r}
-
-```
-
-
-```{r}
-lrn.multinom= makeLearner("classif.multinom", predict.type = "prob", trace = FALSE)
-mod.multinom = train(lrn.multinom, task)
-pred.multinom = predict(mod.multinom, task = task)
-```
-
-Calculate the theoretical threshold for the positive class
-```{r}
-th = matriz_costos[2,1]/(matriz_costos[2,1] + matriz_costos[1,2])
-th
-```
-```{r}
-pred.th = setThreshold(pred.multinom, th)
-```
-
-```{r}
-pred.th
-```
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-## Tuning threshold
-```{r}
-lrn.gbm = makeLearner("classif.gbm", predict.type = "prob", distribution = "bernoulli")
-ps = makeParamSet(
-  makeIntegerParam("interaction.depth", lower = 1, upper = 5)
-)
-ctrl.tune = makeTuneControlRandom(maxit = 2, tune.threshold = TRUE)
-lrn.gbm = makeTuneWrapper(lrn.gbm, par.set = ps,control = ctrl.tune, resampling = cv2)
-r = resample(lrn.gbm, task, cv3, extract = getTuneResult)
-```
-```{r}
-print(r$extract)
-```
-
-
-
-
-
-
-
-
-
-
-
-
+# Final Model
+For the final model we will use a mix of the previous aproaches and we will try different classifier model.
 

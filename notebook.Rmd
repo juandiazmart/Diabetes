@@ -224,7 +224,7 @@ performance(pred.over, measures = list(acc ,auc, ppv, tpr ))
 performance(pred.under, measures = list(acc ,auc, ppv,  tpr ))
 ```
 
-> Future: Try multiple classifications models: Decision Tree, Random Forest, SVM, Gradient Boosting Machine
+
 
 ## 2. Synthetic
 
@@ -282,4 +282,45 @@ r2$aggr
 
 # Final Model
 For the final model we will use a mix of the previous aproaches and we will try different classifier model.
+
+As ballancer method we will use SMOTE
+```{r}
+task.smote
+```
+Learners:
+```{r}
+# glmnet
+classif.lrn = makeLearner("classif.glmnet", predict.type = "prob", fix.factors.prediction = TRUE)
+# Decision Tree
+lrn.tree = makeLearner("classif.rpart", predict.type = "response")
+# Random Forest
+lrn.forest = makeLearner("classif.ranger", predict.type = "response")
+#SVM
+lrn.svm = makeLearner("classif.ksvm", predict.type = "response")
+# GBM
+lrn.gbm = makeLearner("classif.gbm", predict.type = "response")
+# Xgboost
+xg_set = makeLearner("classif.xgboost", predict.type = "response")
+```
+
+Parameters of learners:
+
+```{r}
+# glmnet
+# NA
+# Decision Tree
+
+```
+
+Samplers:
+```{r}
+
+```
+
+
+
+```{r}
+getParamSet("classif.glmnet")
+```
+
 
